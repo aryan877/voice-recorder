@@ -301,17 +301,12 @@ class VoiceRecorder:
             self.pressed_keys.discard(key)
         except KeyError:
             pass
-        
-        # Exit on ESC
-        if key == Key.esc:
-            logger.info("👋 ESC key pressed, exiting...")
-            return False
     
     def run(self):
         """Start the global hotkey listener"""
         logger.info("🎯 Voice Recorder starting...")
         logger.info("📌 Hotkey: Cmd+` (press to toggle recording)")
-        logger.info("🚪 Press ESC to exit")
+        logger.info("🚪 Press Ctrl+C to exit")
         
         # Check for API keys
         azure_key = os.getenv('AZURE_OPENAI_API_KEY')
