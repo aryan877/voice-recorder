@@ -12,6 +12,7 @@ import wave
 import time
 import logging
 import json
+import platform
 from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
@@ -267,18 +268,42 @@ class VoiceRecorder:
         # Small delay to ensure clipboard is set
         time.sleep(0.2)
         
-        logger.info("Pasting text using AppleScript...")
+        system = platform.system()
+        logger.info(f"Pasting text on {system}...")
+        
         try:
-            # Use AppleScript for reliable Cmd+V on macOS
-            import subprocess
-            subprocess.run([
-                'osascript', '-e', 
-                'tell application "System Events" to keystroke "v" using command down'
-            ], check=True, capture_output=True)
-            logger.info("Paste command sent successfully via AppleScript")
+            if system == "Darwin":  # macOS
+                # Use AppleScript for reliable Cmd+V on macOS
+                import subprocess
+                subprocess.run([
+                    'osascript', '-e', 
+                    'tell application "System Events" to keystroke "v" using command down'
+                ], check=True, capture_output=True)
+                logger.info("Paste command sent successfully via AppleScript")
+                
+            elif system == "Windows":
+                # Use pynput keyboard controller for Windows
+                from pynput.keyboard import Key, Controller
+                keyboard = Controller()
+                keyboard.press(Key.ctrl)
+                keyboard.press('v')
+                keyboard.release('v')
+                keyboard.release(Key.ctrl)
+                logger.info("Paste command sent successfully via pynput (Ctrl+V)")
+                
+            else:  # Linux and other Unix-like systems
+                # Use pynput keyboard controller for Linux
+                from pynput.keyboard import Key, Controller
+                keyboard = Controller()
+                keyboard.press(Key.ctrl)
+                keyboard.press('v')
+                keyboard.release('v')
+                keyboard.release(Key.ctrl)
+                logger.info("Paste command sent successfully via pynput (Ctrl+V)")
+                
         except Exception as e:
-            logger.error(f"AppleScript paste failed: {e}")
-            logger.info("Text copied to clipboard - paste manually with Cmd+V")
+            logger.error(f"Paste failed on {system}: {e}")
+            logger.info("Text copied to clipboard - paste manually with Ctrl+V (or Cmd+V on macOS)")
     
     def on_key_press(self, key):
         """Handle key press events"""
@@ -344,5 +369,3 @@ if __name__ == "__main__":
     print("Current working directory:", os.getcwd())
     print("Environment variables loaded")
     main()
-
-
