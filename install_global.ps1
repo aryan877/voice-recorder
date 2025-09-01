@@ -81,12 +81,12 @@ try {
     Write-Host "   ⚠️  Could not check execution policy, continuing..." -ForegroundColor Yellow
 }
 
-# Activate virtual environment
+# Activate virtual environment (dot-source)
 try {
-    & ".\venv\Scripts\Activate.ps1"
+    . ".\venv\Scripts\Activate.ps1"
 } catch {
     Write-Host "   ⚠️  PowerShell activation failed, trying alternative method..." -ForegroundColor Yellow
-    # Use cmd to activate if PowerShell fails
+    # Use cmd to activate if PowerShell fails and continue installation
     cmd /c "venv\Scripts\activate.bat && python -m pip install --upgrade pip"
 }
 
@@ -94,7 +94,7 @@ try {
 python -m pip install --upgrade pip
 
 if (Test-Path "requirements.txt") {
-    pip install -r requirements.txt
+    python -m pip install -r requirements.txt
     if ($LASTEXITCODE -ne 0) {
         Write-Host "❌ Error: Failed to install requirements" -ForegroundColor Red
         exit 1
@@ -118,7 +118,7 @@ $batchContent | Out-File -FilePath $batchFile -Encoding ASCII
 # Create PowerShell script as well for better integration
 $psContent = @"
 Set-Location "$env:USERPROFILE\.voice-recorder"
-& ".\venv\Scripts\Activate.ps1"
+try { . ".\venv\Scripts\Activate.ps1" } catch {}
 python voice_recorder.py `$args
 "@
 

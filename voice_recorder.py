@@ -13,6 +13,10 @@ import time
 import logging
 import json
 import platform
+import math
+import shutil
+import subprocess
+from array import array
 from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
@@ -89,6 +93,116 @@ class VoiceRecorder:
         logger.info(f"Cost tracking: ${self.cost_per_minute}/minute via {self.api_provider}")
         logger.info("VoiceRecorder initialized successfully")
         
+        # Voice effect configuration (beep-only by default; no TTS)
+        self.voice_effects_enabled = os.getenv('VOICE_EFFECTS', 'on').lower() not in ['0', 'off', 'false', 'no']
+        # Modes: 'beep' (default) or 'tts' (not recommended). We default to beep to avoid speech.
+        self.voice_effect_mode = os.getenv('VOICE_EFFECT_MODE', 'beep').lower()
+        logger.info(f"Voice effects: {'enabled' if self.voice_effects_enabled else 'disabled'} (mode: {self.voice_effect_mode})")
+
+    def _tts_available(self) -> bool:
+        if self.voice_effect_mode == 'beep':
+            return False
+        system = platform.system()
+        if system == 'Darwin':
+            return shutil.which('say') is not None
+        if system == 'Windows':
+            return True  # Use PowerShell with System.Speech
+        # Linux/other: try spd-say or espeak
+        return shutil.which('spd-say') is not None or shutil.which('espeak') is not None
+
+    def _speak(self, text: str):
+        if not self.voice_effects_enabled:
+            return
+        if self.voice_effect_mode in ['tts'] and self._tts_available():
+            try:
+                system = platform.system()
+                if system == 'Darwin':
+                    subprocess.Popen(['say', text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                elif system == 'Windows':
+                    # Use PowerShell System.Speech
+                    ps_cmd = (
+                        "Add-Type -AssemblyName System.Speech; "
+                        "(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak(\"" + text.replace('"', '\\"') + "\");"
+                    )
+                    subprocess.Popen(['powershell', '-NoProfile', '-Command', ps_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    if shutil.which('spd-say'):
+                        subprocess.Popen(['spd-say', text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    elif shutil.which('espeak'):
+                        subprocess.Popen(['espeak', text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+            except Exception as e:
+                logger.debug(f"TTS unavailable, falling back to beep: {e}")
+        # Fallback to beep tones
+        self._beep_phrase(text)
+
+    def _play_tone(self, frequency: float, duration_ms: int, volume: float = 0.4):
+        if not self.voice_effects_enabled:
+            return
+        try:
+            pa = pyaudio.PyAudio()
+            stream = pa.open(format=pyaudio.paFloat32, channels=1, rate=self.RATE, output=True)
+            samples_count = int(self.RATE * (duration_ms / 1000.0))
+            two_pi_f = 2 * math.pi * frequency
+            samples = array('f', (volume * math.sin(two_pi_f * t / self.RATE) for t in range(samples_count)))
+            stream.write(samples.tobytes())
+            stream.stop_stream()
+            stream.close()
+            pa.terminate()
+        except Exception as e:
+            # Last resort: terminal bell
+            logger.debug(f"Tone playback failed: {e}")
+            try:
+                sys.stdout.write('\a')
+                sys.stdout.flush()
+            except Exception:
+                pass
+
+    def _beep_phrase(self, text: str):
+        # Map common phrases to tone patterns
+        key = text.lower()
+        if 'start' in key:
+            # Short, clean notification: quick up-chirp (very brief)
+            self._play_tone(900, 90)
+            time.sleep(0.03)
+            self._play_tone(1250, 90)
+        elif 'stop' in key:
+            # Short single downbeat
+            self._play_tone(520, 120)
+        elif 'success' in key or 'copied' in key or 'done' in key:
+            # Pleasant short confirmation: two quick ascending tones
+            self._play_tone(1000, 90)
+            time.sleep(0.03)
+            self._play_tone(1450, 110)
+        elif 'error' in key or 'failed' in key:
+            # Three brief low beeps
+            for f in (320, 280, 240):
+                self._play_tone(f, 90)
+                time.sleep(0.04)
+        else:
+            # Generic chime
+            self._play_tone(1000, 100)
+
+    def audio_cue(self, event: str):
+        """Play a short audio cue or speak a phrase for a given event."""
+        if not self.voice_effects_enabled:
+            return
+        try:
+            event = (event or '').lower()
+            if event == 'start':
+                # Keep it short so it plays before mic opens
+                self._beep_phrase('start')
+            elif event == 'stop':
+                self._beep_phrase('stop')
+            elif event == 'success':
+                self._beep_phrase('success')
+            elif event == 'error':
+                self._beep_phrase('error')
+            else:
+                self._beep_phrase(event)
+        except Exception as e:
+            logger.debug(f"Audio cue failed: {e}")
+        
     def start_recording(self):
         """Start audio recording in a separate thread"""
         if self.is_recording:
@@ -97,6 +211,8 @@ class VoiceRecorder:
             
         self.recording_start_time = time.time()
         logger.info(f"🎙️  Starting recording at {datetime.now().strftime('%H:%M:%S')}")
+        # Play start cue before grabbing the microphone
+        self.audio_cue('start')
         self.is_recording = True
         self.audio_frames = []
         
@@ -130,6 +246,7 @@ class VoiceRecorder:
             except Exception as e:
                 logger.error(f"Error during recording: {e}")
                 self.is_recording = False
+                self.audio_cue('error')
         
         self.recording_thread = threading.Thread(target=record)
         self.recording_thread.start()
@@ -143,6 +260,8 @@ class VoiceRecorder:
             
         logger.info("⏹️  Stopping recording...")
         self.is_recording = False
+        # Immediate stop cue
+        self.audio_cue('stop')
         
         if self.recording_thread:
             logger.info("Waiting for recording thread to finish...")
@@ -151,6 +270,7 @@ class VoiceRecorder:
         
         if not self.audio_frames:
             logger.warning("No audio data recorded")
+            self.audio_cue('error')
             return
             
         # Save audio to temporary file
@@ -170,6 +290,7 @@ class VoiceRecorder:
             logger.info(f"Audio file created successfully. Size: {os.path.getsize(audio_file)} bytes")
         except Exception as e:
             logger.error(f"Error writing audio file: {e}")
+            self.audio_cue('error')
             return
         
         # Transcribe audio
@@ -184,8 +305,10 @@ class VoiceRecorder:
             logger.info(f"📝 Transcribed: {transcription}")
             self.paste_text(transcription)
             logger.info("✅ Copied to clipboard and pasted!")
+            self.audio_cue('success')
         else:
             logger.warning("❌ No transcription received")
+            self.audio_cue('error')
     
     def transcribe_audio(self, audio_file: str) -> Optional[str]:
         """Transcribe audio using OpenAI Whisper"""
@@ -242,6 +365,7 @@ class VoiceRecorder:
                 
         except Exception as e:
             logger.error(f"❌ {self.api_provider} Transcription error: {e}")
+            self.audio_cue('error')
             
             # Log failed attempt
             error_data = {

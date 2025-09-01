@@ -1,5 +1,15 @@
 # Global Voice Recorder Installation
 
+## Prerequisites
+
+- Python 3.7+ installed and in PATH
+- pyaudio build deps:
+  - macOS: `brew install portaudio`
+  - Ubuntu/Debian: `sudo apt-get install -y portaudio19-dev python3-venv`
+  - Windows: installer will handle via pip; if it fails, install a prebuilt PyAudio wheel for your Python version
+ - Optional (audio cues):
+   - Linux: `sudo apt-get install -y speech-dispatcher` (for `spd-say`) or `espeak`
+
 ## Quick Install
 
 ### macOS/Linux
@@ -72,7 +82,7 @@ chmod +x uninstall_global.sh
 ### macOS/Linux
 1. Installs voice recorder to `~/.voice-recorder/`
 2. Creates global `voice-recorder` command
-3. Adds to PATH if needed
+3. Adds `~/.local/bin` to PATH if needed (zsh/bash/fish)
 4. Preserves your API keys and settings
 5. Creates usage logs in global location
 
